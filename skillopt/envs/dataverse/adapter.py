@@ -89,7 +89,22 @@ class DataverseSkillAdapter(EnvAdapter):
         out_dir: str,
         **kwargs,
     ) -> list[dict]:
-        raise NotImplementedError("Task 17 wires this to dataverse.rollout.run_batch")
+        items = list(env_manager) if env_manager is not None else []
+        from skillopt.envs.dataverse.judges_client import JudgeClient
+        from skillopt.envs.dataverse.rollout import run_batch
+        judge_client = JudgeClient()
+        return run_batch(
+            items=items,
+            out_root=out_dir,
+            skill_content=skill_content,
+            plugin_src_dir=self.plugin_src_dir,
+            target_skill_name=self.skill_name,
+            judge_client=judge_client,
+            judge_deployment=os.environ.get("JUDGE_AZURE_OPENAI_DEPLOYMENT", "gpt-5.4-mini"),
+            workers=self.workers,
+            exec_timeout=self.exec_timeout,
+            max_completion_tokens=self.max_completion_tokens,
+        )
 
     def reflect(
         self,
