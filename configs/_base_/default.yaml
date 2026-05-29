@@ -43,6 +43,21 @@ model:
   target_azure_openai_auth_mode: azure_cli
   target_azure_openai_ad_scope: "https://cognitiveservices.azure.com/.default"
   target_azure_openai_managed_identity_client_id: ""
+  # copilot_cli_exec backend
+  copilot_cli_exec_path: copilot
+  copilot_cli_exec_profile: ""
+  copilot_cli_exec_model: gpt-5.5
+  copilot_cli_exec_use_sdk: auto
+  copilot_cli_exec_effort: medium
+  # judge role
+  judge: gpt-5.4-mini
+  judge_backend: openai_chat
+  judge_azure_openai_endpoint: ""
+  judge_azure_openai_api_version: "2024-12-01-preview"
+  judge_azure_openai_api_key: ""
+  judge_azure_openai_auth_mode: azure_cli
+  judge_azure_openai_ad_scope: "https://cognitiveservices.azure.com/.default"
+  judge_azure_openai_managed_identity_client_id: ""
 
 train:
   num_epochs: 4
