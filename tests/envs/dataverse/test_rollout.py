@@ -137,3 +137,89 @@ def test_run_batch_resumes_from_existing_results(tmp_path, fake_plugin):
     # `a` came from the existing results.jsonl, not re-run
     a_result = next(r for r in results if r["id"] == "a")
     assert a_result["hard"] == 1
+
+
+def test_process_one_live_item_sets_trace_env(tmp_path, fake_plugin):
+    """When item.live.enabled, the trace env var is set on the subprocess call."""
+    from skillopt.envs.dataverse.rollout import process_one
+    fake_judge = MagicMock()
+    fake_judge.chat.return_value = "1.0 — ok"
+    item = {
+        "id": "live_001",
+        "skill": "dv-data",
+        "category": "happy_path",
+        "prompt": "create",
+        "expected_summary": "x",
+        "deterministic": {},
+        "semantic": [{"claim": "did it", "priority": 1}],
+        "live": {
+            "enabled": True,
+            "setup": {},
+            "verify": [
+                {"kind": "request_count", "endpoint_regex": "/CreateMultiple", "expected_max": 1}
+            ],
+            "teardown": "delete_session_records",
+        },
+    }
+
+    captured_env = {}
+    def fake_run(*, work_dir, prompt, model, timeout, extra_env=None):
+        captured_env.update(extra_env or {})
+        # Simulate auth.py writing one trace record + zero GUIDs
+        if extra_env and (tp := extra_env.get("DATAVERSE_TRACE_FILE")):
+            import json
+            with open(tp, "a", encoding="utf-8") as f:
+                f.write(json.dumps({"url": "/CreateMultiple", "method": "POST", "status": 204}) + "\n")
+        return ("agent did it via CreateMultiple", "raw")
+
+    with patch("skillopt.envs.dataverse.rollout.run_target_exec", side_effect=fake_run):
+        result = process_one(
+            item,
+            out_root=str(tmp_path / "out"),
+            skill_content="# x\n",
+            plugin_src_dir=str(fake_plugin),
+            target_skill_name="dv-data",
+            judge_client=fake_judge,
+            judge_deployment="gpt-5.4-mini",
+            live_enabled=True,
+            live_client_factory=lambda: MagicMock(),
+        )
+    assert "DATAVERSE_TRACE_FILE" in captured_env
+    # request_count check should pass (1 hit, max 1)
+    assert result["hard"] == 1
+
+
+def test_process_one_live_disabled_skips_trace(tmp_path, fake_plugin):
+    fake_judge = MagicMock()
+    fake_judge.chat.return_value = "1.0 — ok"
+    item = {
+        "id": "live_002",
+        "skill": "dv-data",
+        "category": "happy_path",
+        "prompt": "p",
+        "expected_summary": "e",
+        "deterministic": {},
+        "semantic": [],
+        "live": {
+            "enabled": True,
+            "setup": {},
+            "verify": [{"kind": "request_count", "endpoint_regex": "/x", "expected_max": 0}],
+            "teardown": "delete_session_records",
+        },
+    }
+    captured_env = {}
+    def fake_run(*, work_dir, prompt, model, timeout, extra_env=None):
+        captured_env.update(extra_env or {})
+        return ("ok", "raw")
+    with patch("skillopt.envs.dataverse.rollout.run_target_exec", side_effect=fake_run):
+        result = process_one(
+            item,
+            out_root=str(tmp_path / "out"),
+            skill_content="# x\n",
+            plugin_src_dir=str(fake_plugin),
+            target_skill_name="dv-data",
+            judge_client=fake_judge,
+            judge_deployment="gpt-5.4-mini",
+            live_enabled=False,   # ← disabled
+        )
+    assert "DATAVERSE_TRACE_FILE" not in captured_env

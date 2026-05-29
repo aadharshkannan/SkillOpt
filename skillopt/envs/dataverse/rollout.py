@@ -84,6 +84,8 @@ def process_one(
     judge_deployment: str,
     exec_timeout: int = 240,
     max_completion_tokens: int = 16384,
+    live_enabled: bool = True,
+    live_client_factory=None,
 ) -> dict:
     """Process a single eval item. Returns a SkillOpt result dict."""
     try:
@@ -119,6 +121,21 @@ def process_one(
     }
 
     try:
+        # Determine whether live tracing is active for this item (single-run path).
+        is_live = bool(item.live and item.live.enabled and live_enabled)
+
+        trace_path = ""
+        guids_path = ""
+        extra_env: dict[str, str] = {}
+
+        if is_live:
+            from skillopt.envs.dataverse.live import trace_paths_for
+            trace_path, guids_path = trace_paths_for(out_root, item_id)
+            # Pre-create the files so auth.py's hook can append without racing.
+            open(trace_path, "w", encoding="utf-8").close()
+            open(guids_path, "w", encoding="utf-8").close()
+            extra_env["DATAVERSE_TRACE_FILE"] = trace_path
+
         work_dir = os.path.join(pred_dir, "workspace")
         prepare_workspace(
             work_dir=work_dir,
@@ -134,6 +151,7 @@ def process_one(
             prompt=prompt,
             model="",   # uses COPILOT_CLI_EXEC_MODEL default
             timeout=exec_timeout,
+            extra_env=extra_env if extra_env else None,
         )
 
         with open(os.path.join(pred_dir, "response.txt"), "w", encoding="utf-8") as f:
@@ -174,13 +192,44 @@ def process_one(
             sem_scores.append(score)
 
         live_pass_rate = None
-        if item.live and item.live.enabled:
-            # Task 19 will add real live verification. For now, log a warning
-            # and treat the item as response-only.
-            result["fail_reason"] = (
-                "[WARN] live verification not yet wired (Task 19); "
-                "treating as response-only."
+        created_guids: list[dict] = []
+
+        if is_live:
+            from skillopt.envs.dataverse.live import (
+                read_jsonl,
+                run_verify,
+                teardown as live_teardown,
             )
+
+            trace_records = read_jsonl(trace_path)
+            created_guids = read_jsonl(guids_path)
+
+            if live_client_factory is None:
+                # No client wired — only request_count checks (trace-only) can run.
+                result["fail_reason"] = (
+                    "[WARN] live_client_factory not provided; "
+                    "skipping row_count checks but running request_count checks."
+                )
+                dataverse_client = None
+            else:
+                try:
+                    dataverse_client = live_client_factory()
+                except Exception as e:
+                    result["fail_reason"] = f"live client error: {type(e).__name__}: {e}"
+                    dataverse_client = None
+
+            if dataverse_client is not None or all(
+                c.get("kind") != "row_count" for c in item.live.verify
+            ):
+                live_result = run_verify(item.live.verify, trace_records, dataverse_client)
+                live_pass_rate = live_result.pass_rate
+            else:
+                live_pass_rate = 0.0
+
+            # Teardown — delete every GUID the agent created, log orphans.
+            if dataverse_client is not None and item.live.teardown == "delete_session_records":
+                orphans_path = os.path.join(out_root, "orphans.jsonl")
+                live_teardown(created_guids, dataverse_client, orphans_path)
 
         reward = compose_reward(
             deterministic=det,
@@ -246,6 +295,8 @@ def run_batch(
     exec_timeout: int = 240,
     max_completion_tokens: int = 16384,
     task_timeout: int = 600,
+    live_enabled: bool = True,
+    live_client_factory=None,
 ) -> list[dict]:
     """Run items in parallel with resume support, mirroring searchqa.run_batch."""
     task_timeout = max(int(task_timeout), int(exec_timeout) + 60)
@@ -287,6 +338,8 @@ def run_batch(
             judge_deployment=judge_deployment,
             exec_timeout=exec_timeout,
             max_completion_tokens=max_completion_tokens,
+            live_enabled=live_enabled,
+            live_client_factory=live_client_factory,
         )
 
     with open(results_path, "a", encoding="utf-8") as outf:

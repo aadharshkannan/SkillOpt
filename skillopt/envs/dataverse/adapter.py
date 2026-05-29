@@ -90,6 +90,20 @@ class DataverseSkillAdapter(EnvAdapter):
         **kwargs,
     ) -> list[dict]:
         items = list(env_manager) if env_manager is not None else []
+
+        def _live_client_factory():
+            """Lazily build a DataverseClient using Dataverse-skills' auth.py."""
+            if not self.plugin_src_dir:
+                return None
+            import sys
+            auth_path = os.path.join(
+                self.plugin_src_dir, ".github", "plugins", "dataverse", "scripts"
+            )
+            if auth_path not in sys.path:
+                sys.path.insert(0, auth_path)
+            from auth import get_client  # type: ignore
+            return get_client("skillopt-eval")
+
         from skillopt.envs.dataverse.judges_client import JudgeClient
         from skillopt.envs.dataverse.rollout import run_batch
         judge_client = JudgeClient()
@@ -104,6 +118,8 @@ class DataverseSkillAdapter(EnvAdapter):
             workers=self.workers,
             exec_timeout=self.exec_timeout,
             max_completion_tokens=self.max_completion_tokens,
+            live_enabled=self.live_enabled,
+            live_client_factory=_live_client_factory,
         )
 
     def reflect(

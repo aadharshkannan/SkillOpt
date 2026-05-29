@@ -10,7 +10,7 @@ This patch is **optional** for response-only training — it's only needed for e
 
 When the environment variable `DATAVERSE_TRACE_FILE` is set:
 - Every HTTP request the SDK makes (via the session created in `get_client()`) appends one JSON line to that file: `{"ts": <epoch>, "method": "POST", "url": "...", "status": 200, "summary": {...}}`
-- When a 2xx response comes back from a record-create or upsert endpoint, the response's GUID(s) are extracted and appended one-per-line to the sibling file `<DATAVERSE_TRACE_FILE without .jsonl>_guids.jsonl` (i.e., `dataverse_trace_guids.jsonl`).
+- When a 2xx response comes back from a record-create or upsert endpoint, the response's GUID(s) are extracted and appended one-per-line to the sibling file `created_guids.jsonl` in the same directory as the trace file.
 
 When the env var is unset, behavior is unchanged — no overhead, no files written.
 
@@ -47,9 +47,7 @@ def _guids_path() -> str:
     p = _trace_path()
     if not p:
         return ""
-    if p.endswith(".jsonl"):
-        return p[:-6] + "_guids.jsonl"
-    return p + "_guids.jsonl"
+    return os.path.join(os.path.dirname(p) or ".", "created_guids.jsonl")
 
 
 def _record_trace(method: str, url: str, status: int, response_body_summary: dict | None = None) -> None:
