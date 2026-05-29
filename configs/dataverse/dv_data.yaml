@@ -1,0 +1,8 @@
+_base_: _base.yaml
+
+env:
+  skill_name: dv-data
+  skill_init: ../../Dataverse-skills/.github/plugins/dataverse/skills/dv-data/SKILL.md
+  plugin_src_dir: ../../Dataverse-skills
+  split_mode: split_dir
+  split_dir: data/dataverse/dv_data
