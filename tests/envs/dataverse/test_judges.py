@@ -98,3 +98,32 @@ def test_judge_semantic_claim_handles_malformed_response():
     # Malformed → score 0.0, full text saved as rationale.
     assert score.value == 0.0
     assert "not sure" in score.rationale.lower()
+
+
+from skillopt.envs.dataverse.judges import compose_reward
+
+
+def test_compose_reward_all_pass():
+    det = DeterministicResult(must_contain_pass=1.0, must_not_contain_pass=1.0)
+    sem = [SemanticScore(claim="c", priority=1, value=1.0, rationale="ok")]
+    reward = compose_reward(deterministic=det, semantic=sem, live_pass_rate=None, weights={"semantic": 0.5, "deterministic": 0.5, "live": 0.0})
+    assert reward["hard"] == 1
+    assert reward["soft"] == 1.0
+
+
+def test_compose_reward_p1_semantic_fail_forces_hard_zero():
+    det = DeterministicResult(must_contain_pass=1.0, must_not_contain_pass=1.0)
+    sem = [SemanticScore(claim="c", priority=1, value=0.3, rationale="weak")]
+    reward = compose_reward(deterministic=det, semantic=sem, live_pass_rate=None, weights={"semantic": 0.5, "deterministic": 0.5, "live": 0.0})
+    assert reward["hard"] == 0
+    assert reward["soft"] < 1.0
+
+
+def test_compose_reward_live_block_weights():
+    det = DeterministicResult(must_contain_pass=1.0, must_not_contain_pass=1.0)
+    sem = [SemanticScore(claim="c", priority=1, value=1.0, rationale="ok")]
+    reward = compose_reward(deterministic=det, semantic=sem, live_pass_rate=0.5, weights={"semantic": 0.5, "deterministic": 0.3, "live": 0.2})
+    # 0.5*1.0 + 0.3*1.0 + 0.2*0.5 = 0.9
+    assert abs(reward["soft"] - 0.9) < 0.01
+    # live not all-pass → hard=0
+    assert reward["hard"] == 0

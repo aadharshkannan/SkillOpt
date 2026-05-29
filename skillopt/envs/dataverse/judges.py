@@ -117,3 +117,59 @@ def judge_semantic_claim(
     except ValueError:
         return SemanticScore(claim=claim, priority=priority, value=0.0, rationale=raw.strip())
     return SemanticScore(claim=claim, priority=priority, value=value, rationale=m.group(2).strip())
+
+
+DEFAULT_P1_THRESHOLD = 0.7
+DEFAULT_WEIGHTS = {"semantic": 0.5, "deterministic": 0.3, "live": 0.2}
+
+
+def compose_reward(
+    *,
+    deterministic: DeterministicResult,
+    semantic: list[SemanticScore],
+    live_pass_rate: float | None,
+    weights: dict[str, float] | None = None,
+    p1_threshold: float = DEFAULT_P1_THRESHOLD,
+) -> dict:
+    """Compose hard (0/1) and soft (0..1) reward from the three signals.
+
+    Returns dict with keys: hard, soft, det_breakdown, sem_breakdown, fail_reason.
+    """
+    w = dict(DEFAULT_WEIGHTS)
+    if weights:
+        w.update(weights)
+    # Renormalize when live is absent
+    if live_pass_rate is None:
+        w["live"] = 0.0
+        s = w["semantic"] + w["deterministic"]
+        if s > 0:
+            w["semantic"] /= s
+            w["deterministic"] /= s
+
+    semantic_mean = sum(s.value for s in semantic) / len(semantic) if semantic else 1.0
+    det_rate = deterministic.overall_pass_rate()
+    live_rate = live_pass_rate if live_pass_rate is not None else 1.0
+
+    soft = w["semantic"] * semantic_mean + w["deterministic"] * det_rate + w["live"] * live_rate
+
+    p1_pass = all(s.value >= p1_threshold for s in semantic if s.priority == 1)
+    det_pass = deterministic.all_priority_1_pass()
+    live_ok = live_pass_rate is None or live_pass_rate == 1.0
+    hard = int(p1_pass and det_pass and live_ok)
+
+    fail_lines = []
+    for f in deterministic.failures:
+        fail_lines.append(f"DET FAIL: {f}")
+    for s in semantic:
+        if s.priority == 1 and s.value < p1_threshold:
+            fail_lines.append(f"SEM FAIL P1 [{s.claim[:60]}]: score={s.value:.2f} — {s.rationale}")
+    if live_pass_rate is not None and live_pass_rate < 1.0:
+        fail_lines.append(f"LIVE FAIL: pass_rate={live_pass_rate:.2f}")
+
+    return {
+        "hard": hard,
+        "soft": max(0.0, min(1.0, soft)),
+        "det_breakdown": deterministic,
+        "sem_breakdown": semantic,
+        "fail_reason": "\n".join(fail_lines) if fail_lines else "",
+    }
