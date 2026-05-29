@@ -213,6 +213,12 @@ def configure_azure_openai(
     target_auth_mode: str | None = None,
     target_ad_scope: str | None = None,
     target_managed_identity_client_id: str | None = None,
+    judge_endpoint: str | None = None,
+    judge_api_version: str | None = None,
+    judge_api_key: str | None = None,
+    judge_auth_mode: str | None = None,
+    judge_ad_scope: str | None = None,
+    judge_managed_identity_client_id: str | None = None,
 ) -> None:
     azure_openai.configure_azure_openai(
         endpoint=endpoint,
@@ -233,4 +239,10 @@ def configure_azure_openai(
         target_auth_mode=target_auth_mode,
         target_ad_scope=target_ad_scope,
         target_managed_identity_client_id=target_managed_identity_client_id,
+        judge_endpoint=judge_endpoint,
+        judge_api_version=judge_api_version,
+        judge_api_key=judge_api_key,
+        judge_auth_mode=judge_auth_mode,
+        judge_ad_scope=judge_ad_scope,
+        judge_managed_identity_client_id=judge_managed_identity_client_id,
     )

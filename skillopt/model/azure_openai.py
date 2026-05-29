@@ -96,8 +96,40 @@ TARGET_MANAGED_IDENTITY_CLIENT_ID = (
     or MANAGED_IDENTITY_CLIENT_ID
 ).strip()
 
+JUDGE_ENDPOINT = (
+    os.environ.get("JUDGE_AZURE_OPENAI_ENDPOINT")
+    or os.environ.get("AZURE_OPENAI_JUDGE_ENDPOINT")
+    or ENDPOINT
+)
+JUDGE_API_VERSION = (
+    os.environ.get("JUDGE_AZURE_OPENAI_API_VERSION")
+    or os.environ.get("AZURE_OPENAI_JUDGE_API_VERSION")
+    or API_VERSION
+)
+JUDGE_API_KEY = (
+    os.environ.get("JUDGE_AZURE_OPENAI_API_KEY")
+    or os.environ.get("AZURE_OPENAI_JUDGE_API_KEY")
+    or API_KEY
+)
+JUDGE_AUTH_MODE = (
+    os.environ.get("JUDGE_AZURE_OPENAI_AUTH_MODE")
+    or os.environ.get("AZURE_OPENAI_JUDGE_AUTH_MODE")
+    or AUTH_MODE
+).strip().lower()
+JUDGE_AD_SCOPE = (
+    os.environ.get("JUDGE_AZURE_OPENAI_AD_SCOPE")
+    or os.environ.get("AZURE_OPENAI_JUDGE_AD_SCOPE")
+    or AD_SCOPE
+)
+JUDGE_MANAGED_IDENTITY_CLIENT_ID = (
+    os.environ.get("JUDGE_AZURE_OPENAI_MANAGED_IDENTITY_CLIENT_ID")
+    or os.environ.get("AZURE_OPENAI_JUDGE_MANAGED_IDENTITY_CLIENT_ID")
+    or MANAGED_IDENTITY_CLIENT_ID
+).strip()
+
 OPTIMIZER_DEPLOYMENT = os.environ.get("OPTIMIZER_DEPLOYMENT", "gpt-4o")
 TARGET_DEPLOYMENT = os.environ.get("TARGET_DEPLOYMENT", "gpt-4o")
+JUDGE_DEPLOYMENT = os.environ.get("JUDGE_DEPLOYMENT", "gpt-4o")
 
 REASONING_EFFORT: str | None = None
 
@@ -179,8 +211,10 @@ tracker = TokenTracker()
 
 _optimizer_client: AzureOpenAI | None = None
 _target_client: AzureOpenAI | None = None
+_judge_client: AzureOpenAI | None = None
 _optimizer_lock = threading.Lock()
 _target_lock = threading.Lock()
+_judge_lock = threading.Lock()
 
 
 def _role_config(role: str) -> dict[str, str]:
@@ -201,6 +235,15 @@ def _role_config(role: str) -> dict[str, str]:
             "auth_mode": TARGET_AUTH_MODE,
             "ad_scope": TARGET_AD_SCOPE,
             "managed_identity_client_id": TARGET_MANAGED_IDENTITY_CLIENT_ID,
+        }
+    if role == "judge":
+        return {
+            "endpoint": JUDGE_ENDPOINT,
+            "api_version": JUDGE_API_VERSION,
+            "api_key": JUDGE_API_KEY,
+            "auth_mode": JUDGE_AUTH_MODE,
+            "ad_scope": JUDGE_AD_SCOPE,
+            "managed_identity_client_id": JUDGE_MANAGED_IDENTITY_CLIENT_ID,
         }
     raise ValueError(f"Unknown Azure OpenAI client role: {role!r}")
 
@@ -332,6 +375,14 @@ def get_target_client() -> AzureOpenAI | OpenAI:
             else:
                 _target_client = _make_client("target")
         return _target_client
+
+
+def get_judge_client() -> AzureOpenAI:
+    global _judge_client
+    with _judge_lock:
+        if _judge_client is None:
+            _judge_client = _make_client("judge")
+        return _judge_client
 
 
 def _needs_responses_api(deployment: str) -> bool:
@@ -605,13 +656,21 @@ def configure_azure_openai(
     target_auth_mode: str | None = None,
     target_ad_scope: str | None = None,
     target_managed_identity_client_id: str | None = None,
+    judge_endpoint: str | None = None,
+    judge_api_version: str | None = None,
+    judge_api_key: str | None = None,
+    judge_auth_mode: str | None = None,
+    judge_ad_scope: str | None = None,
+    judge_managed_identity_client_id: str | None = None,
 ) -> None:
     global ENDPOINT, API_VERSION, API_KEY, AUTH_MODE, AD_SCOPE, MANAGED_IDENTITY_CLIENT_ID
     global OPTIMIZER_ENDPOINT, OPTIMIZER_API_VERSION, OPTIMIZER_API_KEY, OPTIMIZER_AUTH_MODE
     global OPTIMIZER_AD_SCOPE, OPTIMIZER_MANAGED_IDENTITY_CLIENT_ID
     global TARGET_ENDPOINT, TARGET_API_VERSION, TARGET_API_KEY, TARGET_AUTH_MODE
     global TARGET_AD_SCOPE, TARGET_MANAGED_IDENTITY_CLIENT_ID
-    global _optimizer_client, _target_client
+    global JUDGE_ENDPOINT, JUDGE_API_VERSION, JUDGE_API_KEY, JUDGE_AUTH_MODE
+    global JUDGE_AD_SCOPE, JUDGE_MANAGED_IDENTITY_CLIENT_ID
+    global _optimizer_client, _target_client, _judge_client
 
     def _clean(value: str | None, *, lower: bool = False) -> str | None:
         if value is None:
@@ -695,10 +754,37 @@ def configure_azure_openai(
         "TARGET_AZURE_OPENAI_MANAGED_IDENTITY_CLIENT_ID",
     )
 
+    resolved_judge_endpoint = _clean(judge_endpoint) or shared_endpoint
+    resolved_judge_api_version = _clean(judge_api_version) or shared_api_version
+    resolved_judge_api_key = _clean(judge_api_key) or shared_api_key
+    resolved_judge_auth_mode = _clean(judge_auth_mode, lower=True) or shared_auth_mode
+    resolved_judge_ad_scope = _clean(judge_ad_scope) or shared_ad_scope
+    resolved_judge_mi = (
+        _clean(judge_managed_identity_client_id)
+        or shared_managed_identity_client_id
+    )
+
+    _set("JUDGE_ENDPOINT", resolved_judge_endpoint, "JUDGE_AZURE_OPENAI_ENDPOINT")
+    _set(
+        "JUDGE_API_VERSION",
+        resolved_judge_api_version,
+        "JUDGE_AZURE_OPENAI_API_VERSION",
+    )
+    _set("JUDGE_API_KEY", resolved_judge_api_key, "JUDGE_AZURE_OPENAI_API_KEY")
+    _set("JUDGE_AUTH_MODE", resolved_judge_auth_mode, "JUDGE_AZURE_OPENAI_AUTH_MODE")
+    _set("JUDGE_AD_SCOPE", resolved_judge_ad_scope, "JUDGE_AZURE_OPENAI_AD_SCOPE")
+    _set(
+        "JUDGE_MANAGED_IDENTITY_CLIENT_ID",
+        resolved_judge_mi,
+        "JUDGE_AZURE_OPENAI_MANAGED_IDENTITY_CLIENT_ID",
+    )
+
     with _optimizer_lock:
         _optimizer_client = None
     with _target_lock:
         _target_client = None
+    with _judge_lock:
+        _judge_client = None
 
 
 def chat_optimizer(
@@ -885,3 +971,57 @@ def set_optimizer_deployment(deployment: str) -> None:
     os.environ["OPTIMIZER_DEPLOYMENT"] = deployment
     with _optimizer_lock:
         _optimizer_client = None
+
+
+def chat_judge(
+    system: str,
+    user: str,
+    max_completion_tokens: int = 16384,
+    retries: int = 5,
+    stage: str = "judge",
+    reasoning_effort: str | None = None,
+    timeout: int | None = None,
+) -> tuple[str, dict]:
+    """Call the judge model. Returns (response_text, usage_dict)."""
+    return _chat_impl(
+        get_judge_client(), JUDGE_DEPLOYMENT,
+        system, user, max_completion_tokens, retries, stage, reasoning_effort, timeout,
+    )
+
+
+def chat_messages_with_judge_deployment(
+    deployment: str,
+    messages: list[dict[str, Any]],
+    max_completion_tokens: int = 16384,
+    retries: int = 5,
+    stage: str = "judge",
+    reasoning_effort: str | None = None,
+    *,
+    tools: list[dict[str, Any]] | None = None,
+    tool_choice: str | dict[str, Any] | None = None,
+    return_message: bool = False,
+    timeout: int | None = None,
+) -> tuple[Any, dict]:
+    """Call a judge deployment with a pre-built chat message list."""
+    return _chat_messages_impl(
+        get_judge_client(),
+        deployment,
+        messages,
+        max_completion_tokens,
+        retries,
+        stage,
+        reasoning_effort,
+        tools=tools,
+        tool_choice=tool_choice,
+        return_message=return_message,
+        timeout=timeout,
+    )
+
+
+def set_judge_deployment(deployment: str) -> None:
+    """Change judge deployment at runtime."""
+    global _judge_client, JUDGE_DEPLOYMENT
+    JUDGE_DEPLOYMENT = deployment
+    os.environ["JUDGE_DEPLOYMENT"] = deployment
+    with _judge_lock:
+        _judge_client = None
