@@ -22,7 +22,8 @@ This spec describes how to bring the two together: author meaningful evals acros
 - ~15-25 hand-authored eval items per skill (~150 total), grounded in documented skill content — no invented criteria.
 - A hybrid reward function: most items are response-judged (LLM judge + deterministic substring checks), ~5-10 per skill are live-verified against a real Dataverse environment.
 - The Dataverse-skills repo remains the source of truth for `SKILL.md` content. SkillOpt trains on a working copy; the best skill from a run is PR'd back manually.
-- Reuse SkillOpt's existing fields, base classes, and reflect pipeline. The only schema addition to SkillOpt is a new `judge` model role that follows the exact same pattern as the existing `optimizer` and `target` roles (own backend, endpoint, auth mode, AD scope, API version, managed-identity client id).
+- **OpenAI-only model usage.** Optimizer, target, and judge all run on OpenAI / Azure OpenAI models. The target is the [GitHub Copilot CLI](https://github.com/github/copilot-cli) (OpenAI-backed agentic CLI), which loads the Dataverse-skills plugin natively via `awesome-copilot`. No Anthropic / Claude models in any role.
+- Reuse SkillOpt's existing fields, base classes, and reflect pipeline. Two additions to SkillOpt: (1) a new `judge` model role that follows the existing `optimizer` / `target` role pattern, and (2) a new `copilot_cli_exec` target backend that follows the existing `claude_code_exec` / `codex_exec` backend pattern.
 
 ## Non-goals
 
@@ -44,10 +45,15 @@ Dataverse-skills/                  ← source of truth for SKILL.md
     dv_query.jsonl
     ...
 
-SkillOpt/                          ← env adapter + training loop
+SkillOpt/                          ← env adapter + training loop + new backend
+  skillopt/model/                  ← MODIFIED
+    copilot_backend.py             ← NEW — chat_target / exec wrapper for Copilot CLI
+    copilot_harness.py             ← NEW — workspace prep + plugin install for Copilot CLI
+    backend_config.py              ← MODIFIED — add "copilot_cli_exec" to allowed target backends
+    router.py                      ← MODIFIED — route to copilot_backend when active
   skillopt/envs/dataverse/         ← NEW — one adapter module, parametrized by skill
     adapter.py                     ← DataverseSkillAdapter(skill_name=...)
-    rollout.py                     ← claude_code_exec wrapper + plugin install
+    rollout.py                     ← copilot_cli_exec wrapper + plugin install
     judges.py                      ← LLM judge + deterministic checks
     live.py                        ← live verification helpers (proxy, teardown)
     dataloader.py
@@ -78,7 +84,7 @@ Aurora Dataverse env               ← live verification target
 2. For each item, rollout:
    - Materializes a *working copy* of the plugin under `outputs/<run>/plugin/`, with the current `SKILL.md` swapped in for the target skill; other skills frozen at their committed version (the agent loads the whole plugin).
    - For live items: spawns a per-item HTTP proxy on a free localhost port.
-   - Invokes `claude_code_exec` with the working-copy plugin manifest, the item's `prompt`, and `DATAVERSE_HTTP_PROXY` env var.
+   - Invokes Copilot CLI via the new `copilot_cli_exec` backend with the working-copy plugin manifest (installed via `awesome-copilot`), the item's `prompt`, and `DATAVERSE_HTTP_PROXY` env var.
    - Captures the final response, any tool calls, and (for live items) the proxy's recorded trace + created-GUID list.
 3. Judge scores the response: deterministic checks + per-claim LLM judge calls.
 4. For live items: adapter runs verification queries against the Dataverse env, then teardown via the SDK.
@@ -174,7 +180,7 @@ Only existing SkillOpt result fields — no new schema additions.
 | `response`       | full agent transcript                                      |
 | `predicted_answer` | extracted final answer (same extraction as SearchQA)    |
 | `fail_reason`    | structured failure block fed to analyst (format below)     |
-| `agent_ok`       | did `claude_code_exec` finish without crashing             |
+| `agent_ok`       | did `copilot_cli_exec` finish without crashing             |
 | `n_turns`        | turn count                                                 |
 | `gold_answers`   | repurposed: list of the item's `semantic[].claim` strings  |
 
@@ -255,7 +261,7 @@ Reuses the Dataverse-skills `scripts/auth.py` pattern. Adapter loads credentials
 
 ### Agent-action observability
 
-Per-item HTTP proxy on a free localhost port. Injected as `DATAVERSE_HTTP_PROXY` into the `claude_code_exec` subprocess environment. The proxy:
+Per-item HTTP proxy on a free localhost port. Injected as `DATAVERSE_HTTP_PROXY` into the `copilot_cli_exec` subprocess environment. The proxy:
 
 - Forwards every request to the real Dataverse env (full pass-through, no MITM).
 - Records `{method, endpoint, status, request_body_hash, response_summary}` per call to `predictions/<id>/dataverse_trace.jsonl`.
@@ -331,10 +337,19 @@ The 8 configs are nearly identical — only `skill_name`, `skill_init`, and `spl
 ### `.env` additions
 
 ```
+# --- judge role (new) ---
 JUDGE_AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/
 JUDGE_AZURE_OPENAI_DEPLOYMENT=gpt-5.4-mini
 JUDGE_AZURE_OPENAI_AUTH_MODE=azure_cli
 
+# --- copilot_cli_exec target backend (new) ---
+COPILOT_CLI_EXEC_PATH=copilot                  # or absolute path to the binary
+COPILOT_CLI_EXEC_PROFILE=                      # optional named profile
+COPILOT_CLI_EXEC_MODEL=gpt-5.5                 # which OpenAI model Copilot CLI uses
+COPILOT_CLI_EXEC_USE_SDK=auto
+COPILOT_CLI_EXEC_EFFORT=medium
+
+# --- Dataverse env ---
 DATAVERSE_ENV_URL=https://aurorabapenvb31ab.crm10.dynamics.com/
 DATAVERSE_PLUGIN_SRC=C:/Users/aadkannan/source/repos/Dataverse-skills
 DATAVERSE_AUTH_MODE=interactive
@@ -344,9 +359,17 @@ SKILLOPT_EVALS_PREFIX=sko
 
 ### Three-model role split
 
-`optimizer`, `target`, and `judge` are each independent SkillOpt roles with their own backend, endpoint, auth mode, AD scope, API version, and managed-identity client id — same pattern that already exists for optimizer/target. Judge is added as the third role following the same pattern.
+All three roles — `optimizer`, `target`, `judge` — run OpenAI models end-to-end:
 
-`claude_code_exec` as the `target_backend` uses the local Claude CLI's own auth (`claude login` or `ANTHROPIC_API_KEY`), not an Azure endpoint. `claude_code_exec_*` settings configure how to invoke the binary, not which API endpoint it calls. Multiple CC profiles via `claude_code_exec_profile` allow different models/effort for different roles.
+| Role | Model | Backend | Auth |
+|---|---|---|---|
+| optimizer | gpt-5.5 (or whatever) | `openai_chat` (Azure or OpenAI direct) | Azure CLI / API key |
+| target | gpt-5.5 (via Copilot CLI) | `copilot_cli_exec` (NEW) | GitHub Copilot auth (`gh auth login`) |
+| judge | gpt-5.4-mini or nano | `openai_chat` on a separate endpoint | Azure CLI / API key |
+
+Each role has its own backend, endpoint, auth mode, AD scope, API version, and managed-identity client id — same role-config pattern that already exists for optimizer/target. Judge is added as the third role following the same pattern.
+
+`copilot_cli_exec` as the `target_backend` uses the local Copilot CLI's own auth (`gh auth login` + Copilot subscription), not an Azure endpoint. `copilot_cli_exec_*` settings configure how to invoke the binary (path, profile, model selection, effort) and follow the existing `claude_code_exec_*` and `codex_exec_*` config patterns 1:1 — no new config schema concept, just a new instance of an established one.
 
 ### Run flow
 
@@ -447,7 +470,7 @@ Explicit choices pinned via brainstorming Q&A, in the order they were made:
 |---|---|---|
 | 1 | Hybrid reward (response-judged + ~5-10 live items per skill) | Tight reward signal for most batches, ground-truth for the critical traps. Pure response-only misses runtime bugs; pure live is too slow and side-effect-heavy. |
 | 2 | One env per skill, eight training jobs | Clean attribution. A dv-query regression never confuses a dv-data loop. Per-skill batch sizes and learning rates. |
-| 3 | `claude_code_exec` target backend with plugin loaded | Matches production setup. Exercises plugin loader, frontmatter routing, references/ on-demand loading. |
+| 3 | `copilot_cli_exec` target backend with plugin loaded (NEW SkillOpt backend, modeled on `claude_code_exec`) | OpenAI-only model usage end-to-end. GitHub Copilot CLI is the OpenAI-backed agentic-CLI analog of Claude Code; Dataverse-skills ships a Copilot variant via `awesome-copilot`, so the plugin loader, frontmatter routing, and references/ on-demand loading are all exercised identically. Costs one new backend module + harness. |
 | 4 | Dedicated `SkillOptEvals` solution + `sko_` prefix + per-item teardown | Predictable isolation, easy to nuke, never touches production tables. One-time setup overhead. |
 | 5 | ~15-25 items per skill, ~150 total, 80/10/10 split | Enough signal for batch_size=8 minibatches; small enough to hand-author from documented sources. |
 | 6 | Train on a working copy in `outputs/`, PR final into Dataverse-skills | Dataverse-skills repo stays source of truth. Crashed runs don't leave the file mid-edit. Parallel runs possible. |
@@ -466,8 +489,9 @@ Explicit choices pinned via brainstorming Q&A, in the order they were made:
 
 ## Migration Plan
 
-1. **SkillOpt repo:** add `skillopt/envs/dataverse/`, `configs/dataverse/`, `data/dataverse/`. No changes to existing envs or shared modules.
-2. **Dataverse-skills repo:** add `evals/skillopt/` alongside the existing `evals/tests/`. Existing `.biceval.json` files and `static_checks.py` keep running. Migrate `dv_data.biceval.json`'s 3 items into `dv_data.jsonl` via the converter; treat the result as a seed, then hand-author the rest.
-3. **Aurora env:** run `setup_live_env.py` once to create `SkillOptEvals` solution and seed `sko_*` reference data.
-4. **Per-skill rollout:** start with `dv-data` (richest existing content, most antipattern surface, has seed items). Land env scaffolding + 15-25 items + noise-floor check. Run first training job. Promote winning skill via draft PR. Validate end-to-end before scaling to the next skill.
-5. **Order of skill rollout:** dv-data → dv-query → dv-metadata → dv-solution → dv-admin → dv-security → dv-overview → dv-connect. Richest content first; orchestration skills last.
+1. **SkillOpt — new `copilot_cli_exec` backend (PRE-REQUISITE).** Add `skillopt/model/copilot_backend.py` + `copilot_harness.py` modeled 1:1 on the existing `claude_backend.py` + `claude_code_exec` path. Update `backend_config.py` to include `"copilot_cli_exec"` in the allowed target backends set and add `configure_copilot_cli_exec` + `get_copilot_cli_exec_config` helpers. Update `router.py` to dispatch to the new backend. Smoke-test against a trivial prompt before the env scaffolding lands. Estimated 2-3 days.
+2. **SkillOpt — env scaffolding.** Add `skillopt/envs/dataverse/`, `configs/dataverse/`, `data/dataverse/`. No changes to existing envs.
+3. **Dataverse-skills repo:** add `evals/skillopt/` alongside the existing `evals/tests/`. Existing `.biceval.json` files and `static_checks.py` keep running. Migrate `dv_data.biceval.json`'s 3 items into `dv_data.jsonl` via the converter; treat the result as a seed, then hand-author the rest.
+4. **Aurora env:** run `setup_live_env.py` once to create `SkillOptEvals` solution and seed `sko_*` reference data. Verify the Copilot CLI Dataverse plugin (`/plugin install dataverse@awesome-copilot`) installs cleanly into a fresh Copilot profile — the env adapter's plugin install path depends on this.
+5. **Per-skill rollout:** start with `dv-data` (richest existing content, most antipattern surface, has seed items). Land env scaffolding + 15-25 items + noise-floor check. Run first training job. Promote winning skill via draft PR. Validate end-to-end before scaling to the next skill.
+6. **Order of skill rollout:** dv-data → dv-query → dv-metadata → dv-solution → dv-admin → dv-security → dv-overview → dv-connect. Richest content first; orchestration skills last.
