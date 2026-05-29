@@ -1,6 +1,9 @@
 """Dataverse environment adapter for SkillOpt."""
 from __future__ import annotations
 
+import json
+import os
+
 from skillopt.datasets.base import BatchSpec
 from skillopt.envs.base import EnvAdapter
 from skillopt.envs.dataverse.dataloader import DataverseSkillDataLoader
@@ -95,8 +98,61 @@ class DataverseSkillAdapter(EnvAdapter):
         out_dir: str,
         **kwargs,
     ) -> list[dict | None]:
-        raise NotImplementedError("Task 22 wires this to run_minibatch_reflect with the patch-scope guardrail")
+        prediction_dir = kwargs.get("prediction_dir", os.path.join(out_dir, "predictions"))
+        patches_dir = kwargs.get("patches_dir", os.path.join(out_dir, "patches"))
+        random_seed = kwargs.get("random_seed")
+        step_buffer_context = kwargs.get("step_buffer_context", "")
+        meta_skill_context = kwargs.get("meta_skill_context", "")
 
+        from skillopt.gradient.reflect import run_minibatch_reflect
+        raw_patches = run_minibatch_reflect(
+            results=results,
+            skill_content=skill_content,
+            prediction_dir=prediction_dir,
+            patches_dir=patches_dir,
+            workers=self.analyst_workers,
+            failure_only=self.failure_only,
+            minibatch_size=self.minibatch_size,
+            edit_budget=self.edit_budget,
+            random_seed=random_seed,
+            error_system=self.get_error_minibatch_prompt(),
+            success_system=self.get_success_minibatch_prompt(),
+            step_buffer_context=step_buffer_context,
+            meta_skill_context=meta_skill_context,
+            update_mode=getattr(self, "_cfg", {}).get("skill_update_mode", "patch"),
+        )
+        return self._filter_in_scope(raw_patches, out_dir)
+
+
+    def _filter_in_scope(self, patches: list, out_dir: str) -> list:
+        """Drop patches whose target_file is not the configured skill's SKILL.md.
+
+        Bare "SKILL.md" (no path separators) is in-scope. Any path that
+        references a subdirectory (e.g., "references/foo.md", "../dv-query/SKILL.md")
+        is out-of-scope.
+        """
+        in_scope = []
+        out_of_scope = []
+        for p in patches:
+            if p is None:
+                in_scope.append(p)
+                continue
+            target = ""
+            if isinstance(p, dict):
+                target = (p.get("target_file") or "SKILL.md")
+            target_norm = target.replace("\\", "/").strip().lower()
+            # In-scope: empty string, "skill.md", or "./skill.md" — no subdirs.
+            if target_norm in ("", "skill.md", "./skill.md"):
+                in_scope.append(p)
+            else:
+                out_of_scope.append(p)
+        if out_of_scope:
+            path = os.path.join(out_dir, "out_of_scope_patches.jsonl")
+            os.makedirs(out_dir, exist_ok=True)
+            with open(path, "a", encoding="utf-8") as f:
+                for p in out_of_scope:
+                    f.write(json.dumps(p) + "\n")
+        return in_scope
 
     def get_task_types(self) -> list[str]:
         return ["dataverse"]
