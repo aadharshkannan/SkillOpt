@@ -97,7 +97,7 @@ def main():
     ap.add_argument("--skill", dest="skill_name", required=True)
     args = ap.parse_args()
     n = convert_biceval_file(args.in_path, args.out_path, args.skill_name)
-    print(f"converted {n} items → {args.out_path}")
+    print(f"converted {n} items -> {args.out_path}")
 
 
 if __name__ == "__main__":
