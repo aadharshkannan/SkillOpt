@@ -45,10 +45,16 @@ def _detect_skill_loaded(response: str, target_skill: str) -> str | None:
     lo = response.lower()
     needles = [
         f"`{target_skill}`",
+        f"**{target_skill}**",
         f"the {target_skill} skill",
         f"`{target_skill}` skill",
         f"loaded the {target_skill}",
+        f"loaded skill: {target_skill}",
         f"using {target_skill}",
+        f"used {target_skill}",
+        f"with the {target_skill}",
+        f"per the {target_skill}",
+        f"from the {target_skill}",
         f"{target_skill}/SKILL.md",
         f"{target_skill}/skill.md",
     ]
