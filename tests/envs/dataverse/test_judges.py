@@ -62,3 +62,39 @@ def test_overall_pass_rate():
     # 1 pass + 1 fail = 0.5 overall
     assert r.overall_pass_rate() == 0.5
     assert r.all_priority_1_pass() is False
+
+
+from unittest.mock import MagicMock
+
+from skillopt.envs.dataverse.judges import (
+    judge_semantic_claim,
+    SemanticScore,
+)
+
+
+def test_judge_semantic_claim_parses_score():
+    fake_client = MagicMock()
+    fake_client.chat.return_value = "0.85 — The agent correctly used CreateMultiple."
+    score = judge_semantic_claim(
+        client=fake_client,
+        response="agent used CreateMultiple",
+        claim="agent uses the bulk form",
+        deployment="gpt-5.4-mini",
+    )
+    assert isinstance(score, SemanticScore)
+    assert 0.84 <= score.value <= 0.86
+    assert "CreateMultiple" in score.rationale
+
+
+def test_judge_semantic_claim_handles_malformed_response():
+    fake_client = MagicMock()
+    fake_client.chat.return_value = "I'm not sure how to rate this."
+    score = judge_semantic_claim(
+        client=fake_client,
+        response="x",
+        claim="y",
+        deployment="gpt-5.4-mini",
+    )
+    # Malformed → score 0.0, full text saved as rationale.
+    assert score.value == 0.0
+    assert "not sure" in score.rationale.lower()
