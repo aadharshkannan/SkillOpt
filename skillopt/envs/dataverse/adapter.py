@@ -102,7 +102,7 @@ class DataverseSkillAdapter(EnvAdapter):
             if auth_path not in sys.path:
                 sys.path.insert(0, auth_path)
             from auth import get_client  # type: ignore
-            return get_client("skillopt-eval")
+            return get_client("dv-data")
 
         from skillopt.envs.dataverse.judges_client import JudgeClient
         from skillopt.envs.dataverse.rollout import run_batch

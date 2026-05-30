@@ -86,6 +86,18 @@ For the first training run you can defer creating these tables; live items will 
 
 ## Step 4 — Task 30: noise-floor check
 
+> **IMPORTANT — use `--split train`, not `--split test`.** The `test` split is 100%
+> `happy_path` items (data_001, data_004, data_012). All `antipattern_trap` items
+> (data_002, data_006, data_007, data_010) live in the `train` split, so a regression
+> that targets antipattern guidance is invisible on `test`. Run the noise-floor on
+> `train`. Also pass `--cfg-options env.live_enabled=false` to run live items
+> response-only — otherwise each live item triggers a per-worker device-code login and
+> references `sko_eval_*` tables that may not exist yet (pure friction for this check).
+>
+> Required env vars for every run below:
+> `$env:DATAVERSE_PLUGIN_SRC="C:\Users\aadkannan\source\repos\Dataverse-skills"`,
+> `$env:JUDGE_AZURE_OPENAI_DEPLOYMENT="gpt-5.4-mini"`, `$env:PYTHONUTF8="1"`.
+
 ```powershell
 cd C:\Users\aadkannan\source\repos\SkillOpt\.claude\worktrees\dataverse-skillopt-dv-data
 
@@ -93,7 +105,7 @@ cd C:\Users\aadkannan\source\repos\SkillOpt\.claude\worktrees\dataverse-skillopt
 python scripts/eval_only.py `
   --config configs/dataverse/dv_data.yaml `
   --skill ../../Dataverse-skills/.github/plugins/dataverse/skills/dv-data/SKILL.md `
-  --split test
+  --split train --cfg-options env.live_enabled=false
 # Record mean(soft) and count(hard=1) from the output.
 
 # 4b. Create a deliberately regressed copy
@@ -106,7 +118,7 @@ copy ..\..\Dataverse-skills\.github\plugins\dataverse\skills\dv-data\SKILL.md `
 python scripts/eval_only.py `
   --config configs/dataverse/dv_data.yaml `
   --skill C:\tmp\regressed_dv_data.md `
-  --split test
+  --split train --cfg-options env.live_enabled=false
 
 # 4c. Create a trivially-changed copy (semantic no-op)
 copy ..\..\Dataverse-skills\.github\plugins\dataverse\skills\dv-data\SKILL.md `
@@ -116,12 +128,22 @@ copy ..\..\Dataverse-skills\.github\plugins\dataverse\skills\dv-data\SKILL.md `
 python scripts/eval_only.py `
   --config configs/dataverse/dv_data.yaml `
   --skill C:\tmp\trivial_dv_data.md `
-  --split test
+  --split train --cfg-options env.live_enabled=false
 ```
 
 **Pass criteria (per spec):**
 - Baseline vs regressed: `mean(soft)` gap ≥ 0.15 AND ≥ 2 items flip `hard=1` → `hard=0`.
 - Baseline vs trivial: `mean(soft)` gap < 0.05, no items flip `hard`.
+
+> **2026-05-30 run — gate FAILED (recorded for posterity, see
+> `outputs/noise_floor_dv_data.md`).** baseline hard=7/13 soft=0.712; regressed
+> hard=6/13 soft=0.665 (only 1 flip, and the two *targeted* items data_006/data_002
+> did not move); trivial hard=8/13 soft=0.726 (1 flip *up*). The regression signal
+> (−0.047 soft / 1 flip) is inside the noise band the no-op trivial exposes
+> (+0.014 soft / 1 flip). Root cause: the strong target model (Copilot CLI) ignores
+> injected antipattern guidance, and single-rollout scoring on 13 items is too noisy.
+> To make the gate meaningful, either add multi-rollout averaging (e.g. 3 samples/item)
+> or author harsher `antipattern_trap` items before trusting selection.
 
 If baseline-vs-regressed gap is too small, add more antipattern_trap items targeting the specific section you regressed. If baseline-vs-trivial gap is too large, the eval set has flaky items — inspect the per-item `fail_reason` to find which ones moved and either tighten or drop them.
 

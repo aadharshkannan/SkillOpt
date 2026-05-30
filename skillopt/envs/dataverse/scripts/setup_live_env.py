@@ -22,7 +22,7 @@ def main():
 
     sys.path.insert(0, os.path.join(plugin_src, ".github", "plugins", "dataverse", "scripts"))
     from auth import get_client  # noqa: E402 — late import via runtime sys.path
-    client = get_client("skillopt-setup")
+    client = get_client("dv-data")
 
     solution_name = os.environ.get("SKILLOPT_EVALS_SOLUTION", "SkillOptEvals")
     prefix = os.environ.get("SKILLOPT_EVALS_PREFIX", "sko")

@@ -79,6 +79,23 @@ def _build_prompt(item, target_skill_name: str) -> str:
     )
 
 
+def _resolve_plugin_tree(plugin_src_dir: str, target_skill_name: str) -> str:
+    """Resolve the plugin manifest tree (containing ``skills/``) from a path that
+    may be either a Dataverse-skills repo root or the plugin tree itself.
+
+    The config/env convention (DATAVERSE_PLUGIN_SRC) points at the repo root, whose
+    plugin tree lives at ``.github/plugins/dataverse``. ``prepare_workspace`` however
+    expects the tree directly. Prefer the path that contains the target skill.
+    """
+    direct = os.path.join(plugin_src_dir, "skills", target_skill_name, "SKILL.md")
+    if os.path.isfile(direct):
+        return plugin_src_dir
+    nested = os.path.join(plugin_src_dir, ".github", "plugins", "dataverse")
+    if os.path.isfile(os.path.join(nested, "skills", target_skill_name, "SKILL.md")):
+        return nested
+    return plugin_src_dir
+
+
 def process_one(
     item_raw: dict,
     out_root: str,
@@ -147,7 +164,7 @@ def process_one(
             work_dir=work_dir,
             skill_md=skill_content,
             task_text=item.prompt,
-            plugin_src_dir=plugin_src_dir,
+            plugin_src_dir=_resolve_plugin_tree(plugin_src_dir, target_skill_name),
             target_skill_name=target_skill_name,
         )
 

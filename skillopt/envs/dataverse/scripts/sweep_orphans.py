@@ -50,7 +50,7 @@ def main():
 
     sys.path.insert(0, os.path.join(args.plugin_src, ".github", "plugins", "dataverse", "scripts"))
     from auth import get_client  # noqa: E402 — late import
-    client = get_client("skillopt-sweep")
+    client = get_client("dv-data")
 
     total = {"deleted": 0, "failed": 0}
     for orphans in Path(args.outputs).rglob("orphans.jsonl"):
