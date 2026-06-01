@@ -180,6 +180,21 @@ def process_one(
         with open(os.path.join(pred_dir, "response.txt"), "w", encoding="utf-8") as f:
             f.write(final or raw)
 
+        # Also emit conversation.json so the reflect/analyst stage can read the
+        # agent's trajectory. The analyst's fmt_minibatch_trajectories looks for
+        # conversation.json per prediction and skips any item that lacks it; the
+        # dataverse agent is single-turn, so we record its prompt + response.
+        with open(os.path.join(pred_dir, "conversation.json"), "w", encoding="utf-8") as f:
+            json.dump(
+                [
+                    {"role": "user", "content": prompt},
+                    {"role": "assistant", "content": final or raw},
+                ],
+                f,
+                ensure_ascii=False,
+                indent=2,
+            )
+
         result["response"] = final or raw
         result["agent_ok"] = bool(final and not final.startswith("[TIMEOUT"))
         result["n_turns"] = 1
