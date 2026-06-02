@@ -28,6 +28,11 @@ CLAUDE_CODE_EXEC_PATH = os.environ.get("CLAUDE_CODE_EXEC_PATH", "claude")
 CLAUDE_CODE_EXEC_PROFILE = os.environ.get("CLAUDE_CODE_EXEC_PROFILE", "")
 CLAUDE_CODE_EXEC_USE_SDK = os.environ.get("CLAUDE_CODE_EXEC_USE_SDK", "auto")
 CLAUDE_CODE_EXEC_EFFORT = os.environ.get("CLAUDE_CODE_EXEC_EFFORT", "medium")
+COPILOT_CLI_EXEC_PATH = os.environ.get("COPILOT_CLI_EXEC_PATH", "copilot")
+COPILOT_CLI_EXEC_PROFILE = os.environ.get("COPILOT_CLI_EXEC_PROFILE", "")
+COPILOT_CLI_EXEC_MODEL = os.environ.get("COPILOT_CLI_EXEC_MODEL", "gpt-5.5")
+COPILOT_CLI_EXEC_USE_SDK = os.environ.get("COPILOT_CLI_EXEC_USE_SDK", "auto")
+COPILOT_CLI_EXEC_EFFORT = os.environ.get("COPILOT_CLI_EXEC_EFFORT", "medium")
 
 
 def _parse_int(value: str | None, default: int) -> int:
@@ -64,10 +69,14 @@ def get_optimizer_backend() -> str:
 def set_target_backend(backend: str) -> None:
     global TARGET_BACKEND
     TARGET_BACKEND = normalize_backend_name(backend or "openai_chat")
-    if TARGET_BACKEND not in {"openai_chat", "claude_chat", "qwen_chat", "codex_exec", "claude_code_exec"}:
+    if TARGET_BACKEND not in {
+        "openai_chat", "claude_chat", "qwen_chat",
+        "codex_exec", "claude_code_exec", "copilot_cli_exec",
+    }:
         raise ValueError(
             f"Unsupported target backend: {TARGET_BACKEND!r}. "
-            "Supported values are 'openai_chat', 'claude_chat', 'qwen_chat', 'codex_exec', and 'claude_code_exec'."
+            "Supported values are 'openai_chat', 'claude_chat', 'qwen_chat', "
+            "'codex_exec', 'claude_code_exec', and 'copilot_cli_exec'."
         )
     os.environ["TARGET_BACKEND"] = TARGET_BACKEND
 
@@ -77,7 +86,7 @@ def get_target_backend() -> str:
 
 
 def is_target_exec_backend() -> bool:
-    return TARGET_BACKEND in {"codex_exec", "claude_code_exec"}
+    return TARGET_BACKEND in {"codex_exec", "claude_code_exec", "copilot_cli_exec"}
 
 
 def is_optimizer_chat_backend() -> bool:
@@ -181,5 +190,42 @@ def get_claude_code_exec_config() -> dict[str, str | int]:
         "use_sdk": CLAUDE_CODE_EXEC_USE_SDK,
         "effort": CLAUDE_CODE_EXEC_EFFORT,
         "max_thinking_tokens": CLAUDE_CODE_EXEC_MAX_THINKING_TOKENS,
+        "empty_response_retries": EXEC_EMPTY_RESPONSE_RETRIES,
+    }
+
+
+def configure_copilot_cli_exec(
+    *,
+    path: str | None = None,
+    profile: str | None = None,
+    model: str | None = None,
+    use_sdk: str | None = None,
+    effort: str | None = None,
+) -> None:
+    global COPILOT_CLI_EXEC_PATH, COPILOT_CLI_EXEC_PROFILE, COPILOT_CLI_EXEC_MODEL, COPILOT_CLI_EXEC_USE_SDK, COPILOT_CLI_EXEC_EFFORT
+    if path is not None:
+        COPILOT_CLI_EXEC_PATH = str(path).strip() or "copilot"
+        os.environ["COPILOT_CLI_EXEC_PATH"] = COPILOT_CLI_EXEC_PATH
+    if profile is not None:
+        COPILOT_CLI_EXEC_PROFILE = str(profile).strip()
+        os.environ["COPILOT_CLI_EXEC_PROFILE"] = COPILOT_CLI_EXEC_PROFILE
+    if model is not None:
+        COPILOT_CLI_EXEC_MODEL = str(model).strip() or "gpt-5.5"
+        os.environ["COPILOT_CLI_EXEC_MODEL"] = COPILOT_CLI_EXEC_MODEL
+    if use_sdk is not None:
+        COPILOT_CLI_EXEC_USE_SDK = str(use_sdk).strip().lower() or "auto"
+        os.environ["COPILOT_CLI_EXEC_USE_SDK"] = COPILOT_CLI_EXEC_USE_SDK
+    if effort is not None:
+        COPILOT_CLI_EXEC_EFFORT = str(effort).strip().lower() or "medium"
+        os.environ["COPILOT_CLI_EXEC_EFFORT"] = COPILOT_CLI_EXEC_EFFORT
+
+
+def get_copilot_cli_exec_config() -> dict[str, str | int]:
+    return {
+        "path": COPILOT_CLI_EXEC_PATH,
+        "profile": COPILOT_CLI_EXEC_PROFILE,
+        "model": COPILOT_CLI_EXEC_MODEL,
+        "use_sdk": COPILOT_CLI_EXEC_USE_SDK,
+        "effort": COPILOT_CLI_EXEC_EFFORT,
         "empty_response_retries": EXEC_EMPTY_RESPONSE_RETRIES,
     }

@@ -1,0 +1,14 @@
+_base_: _base.yaml
+
+model:
+  optimizer: gpt-5.4
+  judge: gpt-5.4-mini
+  azure_openai_endpoint: https://skillsablator.cognitiveservices.azure.com/
+
+env:
+  skill_name: dv-query
+  skill_init: C:\Users\aadkannan\source\repos\Dataverse-skills\.github\plugins\dataverse\skills\dv-query\SKILL.md
+  plugin_src_dir: C:\Users\aadkannan\source\repos\Dataverse-skills
+  split_mode: split_dir
+  split_dir: data/dataverse/dv_query
+  live_enabled: false

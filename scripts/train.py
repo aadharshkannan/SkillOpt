@@ -93,6 +93,11 @@ def _register_builtins() -> None:
         _ENV_REGISTRY["swebench"] = SWEBenchAdapter
     except ImportError:
         pass
+    try:
+        from skillopt.envs.dataverse.adapter import DataverseSkillAdapter
+        _ENV_REGISTRY["dataverse"] = DataverseSkillAdapter
+    except ImportError:
+        pass
 
 
 def get_adapter(cfg: dict):

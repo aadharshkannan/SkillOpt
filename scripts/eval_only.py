@@ -101,6 +101,11 @@ def _register_builtins() -> None:
         _ENV_REGISTRY["swebench"] = SWEBenchAdapter
     except ImportError:
         pass
+    try:
+        from skillopt.envs.dataverse.adapter import DataverseSkillAdapter
+        _ENV_REGISTRY["dataverse"] = DataverseSkillAdapter
+    except ImportError:
+        pass
 
 
 def get_adapter(cfg: dict):
@@ -350,7 +355,7 @@ def main() -> None:
 
     # Load skill
     skill_path = os.path.abspath(args.skill)
-    with open(skill_path) as f:
+    with open(skill_path, encoding="utf-8") as f:
         skill_content = f.read()
     print(f"  [skill] {skill_path} ({len(skill_content)} chars)")
 
@@ -441,7 +446,7 @@ def main() -> None:
         "hard": hard,
         "soft": soft,
     }
-    with open(os.path.join(out_root, "eval_summary.json"), "w") as f:
+    with open(os.path.join(out_root, "eval_summary.json"), "w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2, ensure_ascii=False)
 
     print(f"  Saved to: {out_root}")
